@@ -29,9 +29,10 @@ from utils import logger
 import re
 _cwd = os.getcwd()
 if re.search(r"[一-鿿　-〿＀-￯]", _cwd):
-    logger.warning(
-        f"当前运行目录含中文或全角字符: {_cwd}\n"
-        "部分组件对此类路径兼容性较差，建议将程序移动至纯英文路径下运行。"
+    logger.warn_large(
+        f"当前运行目录含中文或全角字符: {_cwd}
+"
+        "    部分组件对此类路径兼容性较差，建议将程序移动至纯英文路径下运行。"
     )
 
 VENV_NAME = ".venv"  # 虚拟环境目录的名称
@@ -412,18 +413,20 @@ def _check_admin_privilege():
     import ctypes
 
     if ctypes.windll.shell32.IsUserAnAdmin():
+        logger.debug("管理员权限检测: 已以管理员权限运行")
         return
 
-    logger.warning(
-        "未以管理员权限运行，部分输入功能可能无法正常使用。"
-        "请右键 MaaNTE.exe → 以管理员身份运行。"
+    logger.warn_large(
+        "未以管理员权限运行，部分输入功能可能无法正常使用。
+"
+        "    请右键 MaaNTE.exe → 以管理员身份运行。"
     )
-
 
 def _check_game_resolution():
     """连接控制器后检测游戏窗口分辨率"""
     from utils.win32_process import find_window_by_process, get_client_size
 
+    logger.debug("开始检测游戏分辨率")
     hwnd = find_window_by_process("HTGame.exe")
     if hwnd is None:
         logger.warning("分辨率检测: 未找到游戏窗口 (HTGame.exe)")
@@ -438,9 +441,10 @@ def _check_game_resolution():
     if (w, h) == (1280, 720):
         logger.info(f"当前窗口分辨率: {w}x{h} [正常]")
     else:
-        logger.warning(
-            f"当前窗口分辨率: {w}x{h}，请使用 1280x720 分辨率。"
-            "请将游戏设置为 1280x720 窗口化模式，否则部分功能可能异常。"
+        logger.warn_large(
+            f"当前窗口分辨率: {w}x{h}，请使用 1280x720 分辨率。
+"
+            "    请将游戏设置为 1280x720 窗口化模式，否则部分功能可能异常。"
         )
 
 
@@ -450,13 +454,16 @@ def _check_game_resolution():
 
 
 def agent(is_dev_mode=False):
+    logger.info(f"agent 启动, is_dev_mode={is_dev_mode}, platform={sys.platform}")
     try:
         # 清理模块缓存
         utils_modules = [
             name for name in list(sys.modules.keys()) if name.startswith("utils")
         ]
-        for module_name in utils_modules:
-            del sys.modules[module_name]
+        if utils_modules:
+            logger.debug(f"清理 utils 模块缓存: {utils_modules}")
+            for module_name in utils_modules:
+                del sys.modules[module_name]
 
         # 动态导入 utils 的所有内容
         import utils
@@ -474,13 +481,14 @@ def agent(is_dev_mode=False):
 
             change_console_level("DEBUG")
             logger.info("开发模式：日志等级已设置为DEBUG")
-            
 
         from maa.agent.agent_server import AgentServer
         from maa.tasker import Tasker
 
+        logger.debug("导入 custom 模块")
         import custom
 
+        logger.debug("设置 Tasker 日志目录")
         Tasker.set_log_dir("./debug")
 
         if len(sys.argv) < 2:
@@ -488,15 +496,17 @@ def agent(is_dev_mode=False):
             return
 
         socket_id = sys.argv[-1]
-        logger.debug(f"socket_id: {socket_id}")
+        logger.info(f"socket_id: {socket_id}")
 
         log_pi_environment()
+        logger.debug("启动 AgentServer")
         AgentServer.start_up(socket_id)
-        logger.info("AgentServer启动")
+        logger.info("AgentServer 已启动")
         _check_game_resolution()
+        logger.debug("等待 AgentServer 结束")
         AgentServer.join()
         AgentServer.shut_down()
-        logger.info("AgentServer关闭")
+        logger.info("AgentServer 已关闭")
     except ImportError as e:
         logger.error(f"导入模块失败: {e}")
         logger.error("考虑重新配置环境")
@@ -504,7 +514,6 @@ def agent(is_dev_mode=False):
     except Exception as e:
         logger.exception("agent运行过程中发生异常")
         raise
-
 
 # -----
 # region 程序入口
@@ -514,20 +523,27 @@ def agent(is_dev_mode=False):
 def main():
     current_version = read_interface_version()
     is_dev_mode = current_version == "DEBUG"
+    logger.info(f"MaaNTE 启动, 版本: {current_version}, 平台: {sys.platform}")
+
+    _check_chinese_path()
 
     if sys.platform.startswith("win"):
         _check_admin_privilege()
+    else:
+        logger.debug(f"非 Windows 平台 ({sys.platform})，跳过管理员权限检测")
 
     # 如果是Linux系统或开发模式，启动虚拟环境
     if sys.platform.startswith("linux") or is_dev_mode:
         ensure_venv_and_relaunch_if_needed()
 
+    logger.debug("开始检查/安装依赖")
     check_and_install_dependencies()
 
     if is_dev_mode:
         os.chdir(Path("./assets"))
-        logger.info(f"set cwd: {os.getcwd()}")
+        logger.info(f"开发模式：切换工作目录到 {os.getcwd()}")
 
+    logger.debug("进入 agent 主流程")
     agent(is_dev_mode=is_dev_mode)
 
 
