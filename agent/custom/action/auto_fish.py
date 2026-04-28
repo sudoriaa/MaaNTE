@@ -2,43 +2,14 @@ import time
 import json
 from pathlib import Path
 import cv2
-import numpy as np
 
 from maa.agent.agent_server import AgentServer
 from maa.custom_action import CustomAction
 from maa.context import Context
 
+from utils.logger import logger
+from .utils import get_image, match_template_in_region, press_key
 
-def get_image(controller):
-    job = controller.post_screencap()
-    job.wait()
-    img = controller.cached_image
-    return img
-
-def match_template_in_region(img, region, template, min_similarity=0.8):
-    if img is None or not isinstance(img, np.ndarray):
-        return False, 0.0, 0, 0
-    
-    x1, y1, x2, y2 = region
-    
-    h, w = img.shape[:2]
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
-    
-    if x2 <= x1 or y2 <= y1:
-        return False, 0.0, 0, 0
-        
-    roi = img[y1:y2, x1:x2]
-    
-    if len(roi.shape) == 3 and roi.shape[2] == 4:
-        roi = cv2.cvtColor(roi, cv2.COLOR_BGRA2BGR)
-        
-    res = cv2.matchTemplate(roi, template, cv2.TM_CCOEFF_NORMED)
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-    
-    if max_val >= min_similarity:
-        return True, max_val, x1 + max_loc[0], y1 + max_loc[1]
-    return False, max_val, 0, 0
 
 @AgentServer.custom_action("auto_fish")
 class AutoFish(CustomAction):
@@ -62,7 +33,7 @@ class AutoFish(CustomAction):
     escape_template = cv2.imread(str(escape_img), cv2.IMREAD_COLOR)
 
     def run(self, context: Context, argv: CustomAction.RunArg) -> CustomAction.RunResult:
-        print("=== Autofish Action Started ===")
+        logger.task("自动钓鱼 开始")
         controller = context.tasker.controller
 
         fishing_count = 10
@@ -74,29 +45,28 @@ class AutoFish(CustomAction):
                 check_freq = params.get("freq", 0.01)
             except:
                 pass
-   
+
         KEY_A = 65
         KEY_D = 68
         KEY_F = 70
         KEY_ESC = 27
 
-        success_region = (520, 160, 785, 190)
-        settlement_region = (564, 642, 1206, 664)
-        game_region = (400, 33, 882, 63)
-        escape_region = (590, 349, 689, 371)
+        # 区域格式: [x, y, w, h]
+        success_region = [520, 160, 265, 30]
+        settlement_region = [564, 642, 642, 22]
+        game_region = [400, 33, 482, 30]
+        escape_region = [590, 349, 99, 22]
 
         for i in range(fishing_count):
             if context.tasker.stopping:
                 return CustomAction.RunResult(success=False)
-            print(f"=== Fishing {i + 1}/{fishing_count} ===")
+            logger.task(f"钓鱼 {i + 1}/{fishing_count}")
 
             while True:
                 if context.tasker.stopping:
                     return CustomAction.RunResult(success=False)
-                controller.post_key_down(KEY_F)
-                time.sleep(0.1)
-                controller.post_key_up(KEY_F)
-                print("  Casting...")
+
+                press_key(controller, KEY_F, "F (抛竿)")
 
                 while True:
                     if context.tasker.stopping:
@@ -105,12 +75,10 @@ class AutoFish(CustomAction):
                     img = get_image(controller)
                     m_catch, _, _, _ = match_template_in_region(img, success_region, self.success_catch_template, 0.8)
                     if m_catch:
-                        controller.post_key_down(KEY_F)
-                        time.sleep(0.1)
-                        controller.post_key_up(KEY_F)
-                        print("  Fish hooked!")
+                        press_key(controller, KEY_F, "F (提竿)")
+                        logger.info("鱼已上钩！")
                         break
-      
+
                 start_time = time.time()
                 frame = 0
                 deadzone = 15
@@ -125,32 +93,28 @@ class AutoFish(CustomAction):
                     if frame % 10 == 0:
                         m_settle, _, _, _ = match_template_in_region(img, settlement_region, self.continue_template, 0.8)
                         if m_settle:
-                            print("  Fish caught!")
+                            logger.info("鱼已钓上！")
                             break
                         m_escape, _, _, _ = match_template_in_region(img, escape_region, self.escape_template, 0.8)
                         if m_escape:
-                            print("  Fish escaped! Recasting...")
+                            logger.warning("鱼逃脱，重新抛竿")
                             break
 
                     m_left, _, x_left, _ = match_template_in_region(img, game_region, self.valid_region_left_template, 0.7)
                     m_right, _, x_right, _ = match_template_in_region(img, game_region, self.valid_region_right_template, 0.7)
                     m_slider, _, x_slider, _ = match_template_in_region(img, game_region, self.slider_template, 0.7)
 
-                    if m_slider:                      
+                    if m_slider:
                         if frame % 10 == 0:
-                            controller.post_key_down(KEY_F)
-                            time.sleep(0.05)
-                            controller.post_key_up(KEY_F)
-            
+                            press_key(controller, KEY_F, "F (拉竿)")
+
                         if m_left and m_right:
                             target = (x_left + x_right) / 2
                             offset = x_slider - target
                         elif not m_left and m_right:
-                            target = x_right
-                            offset = x_slider - target
+                            offset = x_slider - x_right
                         elif m_left and not m_right:
-                            target = x_left
-                            offset = x_slider - target
+                            offset = x_slider - x_left
                         else:
                             offset = 0
 
@@ -164,35 +128,30 @@ class AutoFish(CustomAction):
                             else:
                                 controller.post_key_up(KEY_A)
                                 controller.post_key_up(KEY_D)
-                
+
                 controller.post_key_up(KEY_D)
                 controller.post_key_up(KEY_A)
                 controller.post_key_up(KEY_F)
-                
+
                 img = get_image(controller)
                 time.sleep(0.3)
                 m_escape, _, _, _ = match_template_in_region(img, escape_region, self.escape_template, 0.8)
                 if m_escape:
-                    continue  
-                break  
+                    continue
+                break
 
-            print("  Finished.")
-
+            # 关闭结算界面
             img = get_image(controller)
             match_settle, _, _, _ = match_template_in_region(img, settlement_region, self.continue_template, 0.8)
             if match_settle:
-                print("  Closing settlement screen...")
+                logger.substep("关闭结算界面")
                 for _ in range(5):
-                    controller.post_key_down(KEY_ESC)
-                    time.sleep(0.1)
-                    controller.post_key_up(KEY_ESC)
+                    press_key(controller, KEY_ESC, "ESC")
                     time.sleep(1)
-
                     img = get_image(controller)
                     m, _, _, _ = match_template_in_region(img, settlement_region, self.continue_template, 0.8)
                     if not m:
-                        print("  Settlement closed.")
                         break
 
-        print("All fishing tasks complete.")
+        logger.task("自动钓鱼 完成")
         return CustomAction.RunResult(success=True)

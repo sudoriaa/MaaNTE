@@ -2,7 +2,6 @@ import time
 import json
 import cv2
 from pathlib import Path
-from .utils import get_image, match_template_in_region, click_rect
 
 from maa.agent.agent_server import AgentServer
 from maa.custom_action import CustomAction
@@ -10,6 +9,9 @@ from maa.context import Context
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.pipeline import JRecognitionType, JOCR
+
+from utils.logger import logger
+from .utils import get_image, match_template_in_region, click_rect, press_key
 
 
 @AgentServer.custom_action("auto_buy_fish_bait")
@@ -44,9 +46,10 @@ class AutoBuyFishBait(CustomAction):
         shell_count_region = [961, 31, 70, 21]
         KEY_R = 82
         KEY_ESC = 27
-        controller = context.tasker.controller  
-        print("=== AutoBuyFishBait Action Started ===")
+        controller = context.tasker.controller
+        logger.task("自动购买鱼饵 开始")
 
+        # 在鱼铺中找到鱼饵
         while True:
             img = get_image(controller)
             found_bait, _, x, y = match_template_in_region(img, fish_shop_region, self.bait_template, 0.8)
@@ -54,19 +57,17 @@ class AutoBuyFishBait(CustomAction):
                 for _ in range(3):
                     click_rect(controller, [x, y, bait_region[2], bait_region[3]])
                     time.sleep(0.1)
-                
                 img = get_image(controller)
                 found_bait_success, _, _, _ = match_template_in_region(img, find_bait_success_region, self.find_bait_success_template, 0.8)
                 if found_bait_success:
-                    img = get_image(controller)
                     time.sleep(0.5)
                     break
             else:
-                print("Bait not found in fish shop, retrying...")
-                controller.post_click_key(KEY_R).wait()  
+                logger.warning("鱼铺中未找到鱼饵，按 R 键刷新")
+                press_key(controller, KEY_R, "R")
                 time.sleep(1)
-                continue
 
+        # 点击最大数量
         while True:
             img = get_image(controller)
             found_select_max, _, _, _ = match_template_in_region(img, select_max_region, self.select_max_template, 0.8)
@@ -77,9 +78,9 @@ class AutoBuyFishBait(CustomAction):
                 time.sleep(0.5)
                 break
             else:
-                print("Select max option not found, retrying...")
                 time.sleep(1)
-        
+
+        # 点击购买
         while True:
             img = get_image(controller)
             found_buy, _, _, _ = match_template_in_region(img, buy_region, self.buy_template, 0.8)
@@ -90,9 +91,9 @@ class AutoBuyFishBait(CustomAction):
                 time.sleep(0.5)
                 break
             else:
-                print("Buy button not found, retrying...")
                 time.sleep(1)
 
+        # 点击确认购买
         for _ in range(5):
             img = get_image(controller)
             found_buy_confirm, _, _, _ = match_template_in_region(img, buy_confirm_region, self.buy_confirm_template, 0.8)
@@ -103,19 +104,20 @@ class AutoBuyFishBait(CustomAction):
                 time.sleep(0.5)
                 break
             else:
-                print("Buy confirm button not found, retrying...")
                 time.sleep(0.2)
 
+        # 等待购买成功
         while True:
             img = get_image(controller)
             found_buy_success, _, _, _ = match_template_in_region(img, buy_success_region, self.buy_success_template, 0.8)
             if found_buy_success:
-                controller.post_click_key(KEY_ESC).wait()
+                logger.info("购买成功")
+                press_key(controller, KEY_ESC, "ESC")
                 time.sleep(0.5)
-                controller.post_click_key(KEY_ESC).wait()
+                press_key(controller, KEY_ESC, "ESC")
                 break
             else:
-                print("Buy success confirmation not found, retrying...")
-                time.sleep(1)                
+                time.sleep(1)
 
+        logger.task("自动购买鱼饵 完成")
         return CustomAction.RunResult(success=True)
