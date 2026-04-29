@@ -2,13 +2,11 @@ import time
 import json
 import cv2
 from pathlib import Path
+from .utils import get_image, match_template_in_region, click_rect
 
 from maa.agent.agent_server import AgentServer
 from maa.custom_action import CustomAction
 from maa.context import Context
-
-from utils.logger import logger
-from .utils import get_image, match_template_in_region, click_rect, press_key
 
 
 @AgentServer.custom_action("auto_sell_fish")
@@ -18,7 +16,7 @@ class AutoSellFish(CustomAction):
             image_dir = abs_path / "assets/resource/base/image/auto_sell_fish"
     else:
         image_dir = abs_path / "resource/base/image/auto_sell_fish"
-
+    
     sell_option_img = image_dir / "sell_option_gray.png"
     sell_option_selected_img = image_dir / "sell_option.png"
     no_fish_to_sell_img = image_dir / "no_fish.png"
@@ -35,12 +33,12 @@ class AutoSellFish(CustomAction):
     sell_fail_template = cv2.imread(str(sell_fail_img), cv2.IMREAD_COLOR)
 
     def run(self, context: Context, argv: CustomAction.RunArg) -> CustomAction.RunResult:
-        logger.task("自动卖鱼 开始")
+        print("=== Autofish Action Started ===")
         controller = context.tasker.controller
 
         KEY_Q = 81
         KEY_ESC = 27
-
+        
         no_fish_to_sell_region = [433, 457, 77, 20]
         sell_option_region = [63, 247, 66, 57]
         sell_option_selected_region = [172, 166, 103, 29]
@@ -49,8 +47,7 @@ class AutoSellFish(CustomAction):
         sell_success_region = [565, 628, 149, 21]
         sell_fail_region = [739, 349, 202, 24]
         no_valid_fish_region = [509, 350, 261, 22]
-
-        # 打开卖出界面
+        
         while True:
             img = get_image(controller)
             found_sell_option, _, _, _ = match_template_in_region(img, sell_option_region, self.sell_option_template, 0.7)
@@ -58,48 +55,50 @@ class AutoSellFish(CustomAction):
                 for _ in range(3):
                     click_rect(controller, sell_option_region)
                     time.sleep(0.1)
+                
                 img = get_image(controller)
                 found_sell_option_selected, _, _, _ = match_template_in_region(img, sell_option_selected_region, self.sell_option_selected_template, 0.8)
                 if found_sell_option_selected:
                     break
-                time.sleep(1)
+                time.sleep(1)  
             else:
-                press_key(controller, KEY_Q, "Q")
-                time.sleep(1)
+                controller.post_click_key(KEY_Q).wait()  
+                time.sleep(1)  
 
-        logger.info("检测到卖出选项，开始卖鱼")
+        print("Sell option detected. Proceeding to sell fish.")
 
-        # 检查是否有鱼可卖
         for _ in range(5):
             img = get_image(controller)
             found_no_fish_to_sell, prob, _, _ = match_template_in_region(img, no_fish_to_sell_region, self.no_fish_to_sell_template, 0.8)
             time.sleep(0.1)
             if found_no_fish_to_sell:
-                logger.warning("没有可出售的鱼，关闭鱼铺")
-                press_key(controller, KEY_ESC, "ESC")
+                print("No fish to sell detected. Closing fish shop.")
+                controller.post_click_key(KEY_ESC).wait()  
                 return CustomAction.RunResult(success=True)
-
-        # 点击卖出按钮
+        
         while True:
             img = get_image(controller)
             found_sell_button, _, _, _ = match_template_in_region(img, sell_button_region, self.sell_button_template, 0.8)
             if found_sell_button:
+                print("Sell button detected. Clicking to confirm selling fish.")
                 while True:
                     for _ in range(3):
                         click_rect(controller, sell_button_region)
                         time.sleep(0.1)
+                        
                     img = get_image(controller)
                     found_confirm_sell, _, _, _ = match_template_in_region(img, confirm_sell_region, self.confirm_sell_template, 0.8)
                     sell_fail, _, _, _ = match_template_in_region(img, sell_fail_region, self.sell_fail_template, 0.8)
                     if found_confirm_sell:
+                        print("Confirm sell button detected. Clicking to confirm selling fish.")
                         for _ in range(3):
                             click_rect(controller, confirm_sell_region)
                             time.sleep(0.1)
-                        time.sleep(1)
+                        time.sleep(1)  
                         break
                     elif sell_fail:
-                        logger.warning("没有可出售的鱼，关闭鱼铺")
-                        press_key(controller, KEY_ESC, "ESC")
+                        print("no fish to sell, closing fish shop.")
+                        controller.post_click_key(KEY_ESC).wait()
                         return CustomAction.RunResult(success=True)
                     else:
                         time.sleep(0.1)
@@ -107,18 +106,17 @@ class AutoSellFish(CustomAction):
             else:
                 time.sleep(0.1)
 
-        # 等待卖出成功
         while True:
             img = get_image(controller)
             found_sell_success, _, _, _ = match_template_in_region(img, sell_success_region, self.sell_success_template, 0.8)
             if found_sell_success:
-                logger.info("鱼已卖出")
-                press_key(controller, KEY_ESC, "ESC")
+                print("Sell success detected. Fish sold successfully.")
+                controller.post_click_key(KEY_ESC).wait()  
                 time.sleep(0.5)
-                press_key(controller, KEY_ESC, "ESC")
+                controller.post_click_key(KEY_ESC).wait()
                 break
             else:
                 time.sleep(1)
-
-        logger.task("自动卖鱼 完成")
+        
+        print("All fishing tasks complete.")
         return CustomAction.RunResult(success=True)

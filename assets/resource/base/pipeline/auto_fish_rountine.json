@@ -15,19 +15,14 @@
             "freq": 0.001
         },
         "next": [
-            "AutoSellFish",
-            "AutoBuyFishBait",
-            "StartFishing",
-            "TaskComplete"
+            "AutoSellFish"
         ]
     },
     "AutoSellFish": {
         "action": "Custom",
         "custom_action": "auto_sell_fish",
         "next": [
-            "AutoBuyFishBait",
-            "StartFishing",
-            "TaskComplete"
+            "AutoBuyFishBait"
         ]
     },
     "AutoBuyFishBait": {
